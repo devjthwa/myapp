@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = 'us-east-1'
+        AWS_REGION = 'ap-south-1'
         ACCOUNT_ID = '303238377772'
         ECR_REPO = 'myapp'
 
@@ -14,12 +14,6 @@ pipeline {
 
     stages {
 
-        stage('Clone') {
-            steps {
-                git 'https://github.com/devjthwa/myapp.git'
-            }
-        }
-
         stage('Build Docker') {
             steps {
                 sh '''
@@ -30,11 +24,20 @@ pipeline {
 
         stage('Login ECR') {
             steps {
-                sh '''
-                aws ecr get-login-password --region $AWS_REGION | \
-                docker login --username AWS --password-stdin \
-                $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-                '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+
+                    sh '''
+                    aws ecr get-login-password --region $AWS_REGION | \
+                    docker login --username AWS --password-stdin \
+                    $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+                    '''
+                }
             }
         }
 
@@ -56,6 +59,7 @@ pipeline {
             }
         }
 
+        /*
         stage('Deploy ECS') {
             steps {
                 sh '''
@@ -67,5 +71,6 @@ pipeline {
                 '''
             }
         }
+        */
     }
 }
