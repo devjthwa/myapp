@@ -16,7 +16,7 @@ pipeline {
 
         stage('Clone') {
             steps {
-                git 'https://github.com/devjthwa/YOUR_REPO.git'
+                git 'https://github.com/devjthwa/myapp.git'
             }
         }
 
