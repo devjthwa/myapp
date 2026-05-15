@@ -59,18 +59,17 @@ pipeline {
             }
         }
 
-        /*
-        stage('Deploy ECS') {
-            steps {
-                sh '''
-                aws ecs update-service \
-                  --cluster $ECS_CLUSTER \
-                  --service $ECS_SERVICE \
-                  --force-new-deployment \
-                  --region $AWS_REGION
-                '''
-            }
+        stage('Deploy to EC2') {
+    steps {
+        sh '''
+        ssh -o StrictHostKeyChecking=no ubuntu@172.31.15.122 "
+        docker stop myapp || true &&
+        docker rm myapp || true &&
+        docker pull 303238377772.dkr.ecr.us-east-2.amazonaws.com/myapp:${IMAGE_TAG} &&
+        docker run -d -p 80:80 --name myapp 303238377772.dkr.ecr.us-east-2.amazonaws.com/myapp:${IMAGE_TAG}
+        "
+        '''
         }
-        */
+    }
     }
 }
