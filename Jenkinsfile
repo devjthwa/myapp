@@ -6,15 +6,19 @@ pipeline {
         ACCOUNT_ID = '303238377772'
         ECR_REPO = 'myapp'
 
+        // BEST PRACTICE: use build number OR git commit
         IMAGE_TAG = "${BUILD_NUMBER}"
-
-        ECS_CLUSTER = 'myapp-cluster'
-        ECS_SERVICE = 'myapp-service'
     }
 
     stages {
 
-        stage('Build Docker') {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/devjthwa/myapp.git'
+            }
+        }
+
+        stage('Build Docker Image') {
             steps {
                 sh '''
                 docker build -t $ECR_REPO:$IMAGE_TAG .
@@ -22,26 +26,17 @@ pipeline {
             }
         }
 
-        stage('Login ECR') {
+        stage('Login to ECR') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    )
-                ]) {
-
-                    sh '''
-                    aws ecr get-login-password --region $AWS_REGION | \
-                    docker login --username AWS --password-stdin \
-                    $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-                    '''
-                }
+                sh '''
+                aws ecr get-login-password --region $AWS_REGION | \
+                docker login --username AWS --password-stdin \
+                $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+                '''
             }
         }
 
-        stage('Tag Docker Image') {
+        stage('Tag Image') {
             steps {
                 sh '''
                 docker tag $ECR_REPO:$IMAGE_TAG \
@@ -50,7 +45,7 @@ pipeline {
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push Image') {
             steps {
                 sh '''
                 docker push \
@@ -60,16 +55,32 @@ pipeline {
         }
 
         stage('Deploy to EC2') {
-    steps {
-        sh '''
-        ssh -o StrictHostKeyChecking=no ubuntu@172.31.15.122 "
-        docker stop myapp || true &&
-        docker rm myapp || true &&
-        docker pull 303238377772.dkr.ecr.us-east-2.amazonaws.com/myapp:${IMAGE_TAG} &&
-        docker run -d -p 80:80 --name myapp 303238377772.dkr.ecr.us-east-2.amazonaws.com/myapp:${IMAGE_TAG}
-        "
-        '''
+            steps {
+                sh '''
+                ssh -o StrictHostKeyChecking=no ubuntu@172.31.15.122 "
+                
+                # stop old container safely
+                docker stop myapp || true
+                docker rm myapp || true
+
+                # pull latest build
+                docker pull $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+
+                # run new container
+                docker run -d -p 80:80 --name myapp \
+                $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+                "
+                '''
+            }
         }
     }
+
+    post {
+        success {
+            echo 'Deployment SUCCESS 🚀'
+        }
+        failure {
+            echo 'Deployment FAILED ❌'
+        }
     }
 }
