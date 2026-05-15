@@ -2,19 +2,34 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = 'us-east-2'
-        ACCOUNT_ID = '303238377772'
-        ECR_REPO = 'myapp'
+        AWS_REGION   = 'us-east-2'
+        ACCOUNT_ID   = '303238377772'
+        ECR_REPO     = 'myapp'
 
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_TAG    = "${BUILD_NUMBER}"
 
-        ECS_CLUSTER = 'myapp'
-        ECS_SERVICE = 'myapp-service'
+        ECS_CLUSTER  = 'myapp'
+        ECS_SERVICE  = 'myapp-service'
+
+        CONTAINER_NAME = 'myapp'
     }
 
     stages {
 
-        stage('Build Docker') {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main',
+                url: 'https://github.com/devjthwa/myapp.git'
+            }
+        }
+
+        stage('Build Docker Image') {
             steps {
                 sh '''
                 docker build -t $ECR_REPO:$IMAGE_TAG .
@@ -22,15 +37,13 @@ pipeline {
             }
         }
 
-        stage('Login ECR') {
+        stage('Login to AWS ECR') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    )
-                ]) {
+
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
 
                     sh '''
                     aws ecr get-login-password --region $AWS_REGION | \
@@ -50,7 +63,7 @@ pipeline {
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push Docker Image to ECR') {
             steps {
                 sh '''
                 docker push \
@@ -59,17 +72,56 @@ pipeline {
             }
         }
 
-        stage('Deploy to EC2') {
-    steps {
-        sh '''
-        ssh -o StrictHostKeyChecking=no ubuntu@172.31.15.122 "
-        docker stop myapp || true &&
-        docker rm myapp || true &&
-        docker pull 303238377772.dkr.ecr.us-east-2.amazonaws.com/myapp:${IMAGE_TAG} &&
-        docker run -d -p 80:80 --name myapp 303238377772.dkr.ecr.us-east-2.amazonaws.com/myapp:${IMAGE_TAG}
-        "
-        '''
+        stage('Deploy to ECS') {
+            steps {
+
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+
+                    sh '''
+                    aws ecs update-service \
+                      --cluster $ECS_CLUSTER \
+                      --service $ECS_SERVICE \
+                      --force-new-deployment \
+                      --region $AWS_REGION
+                    '''
+                }
+            }
+        }
+
+        stage('Wait for ECS Stability') {
+            steps {
+
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+
+                    sh '''
+                    aws ecs wait services-stable \
+                      --cluster $ECS_CLUSTER \
+                      --services $ECS_SERVICE \
+                      --region $AWS_REGION
+                    '''
+                }
+            }
         }
     }
+
+    post {
+
+        success {
+            echo 'ECS Deployment SUCCESS 🚀'
+        }
+
+        failure {
+            echo 'ECS Deployment FAILED ❌'
+        }
+
+        always {
+            sh 'docker system prune -af || true'
+        }
     }
 }
